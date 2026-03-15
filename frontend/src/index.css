@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Configuration globale pour Waska Village */
+@layer base {
+  body {
+    margin: 0;
+    font-family: 'DM Sans', sans-serif; /* Proche de votre modèle */
+    @apply bg-slate-100 text-slate-900;
+  }
+}
+
+/* Vous pouvez ajouter vos styles personnalisés ici */
