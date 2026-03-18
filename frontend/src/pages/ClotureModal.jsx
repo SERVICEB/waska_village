@@ -69,22 +69,17 @@ const ClotureModal = ({ soldeTheorique, onSuccess }) => {
     try {
       const token = localStorage.getItem('userToken');
       
+      // On aplatit le payload pour correspondre aux attentes du Backend
       const payload = {
-        pointDeVente: 'Réception',
-        caissier: localStorage.getItem('userName') || 'Utilisateur Système', 
-        stats: {
-          declare: {
-            total: Number(totalDeclare),
-            cash: Number(formData.cash),
-            mobile: Number(formData.mobile)
-          },
-          theorique: safeTheorique,
-          ecart: ecart
-        },
+        type: 'reception', // Point de vente
+        montantEspeces: Number(formData.cash), // Le backend attend 'montantEspeces'
+        montantMobile: Number(formData.mobile), // Le backend attend 'montantMobile'
+        totalVentes: Number(totalDeclare),      // Le backend attend 'totalVentes'
         notes: formData.notes || "Clôture normale"
       };
 
-      // 1. Enregistrer la clôture et ARCHIVER les transactions
+      console.log("🚀 Envoi de la clôture :", payload);
+
       const response = await fetch('http://localhost:5000/api/clotures', {
         method: 'POST',
         headers: {
@@ -94,21 +89,22 @@ const ClotureModal = ({ soldeTheorique, onSuccess }) => {
         body: JSON.stringify(payload)
       });
 
+      const result = await response.json();
+
       if (response.ok) {
-        // 2. Lancer l'impression du rapport Z
         handlePrintZReport();
-        
         setStep(3);
-        // 3. Rafraîchir les données (Caisse passera à 0 car logs archivés)
+        // On attend un peu pour que l'utilisateur voit le succès
         setTimeout(() => {
           onSuccess(); 
-        }, 2000);
+        }, 2500);
       } else {
-        const result = await response.json();
-        alert(`Erreur validation: ${result.message || "Vérifiez les champs"}`);
+        // Affiche l'erreur précise venant du backend (ex: validation Mongoose)
+        alert(`Erreur validation: ${result.message || result.details || "Vérifiez les données"}`);
       }
     } catch (err) {
-      alert("Impossible de contacter le serveur.");
+      console.error("Erreur Fetch:", err);
+      alert("Impossible de contacter le serveur. Vérifiez votre connexion.");
     } finally {
       setLoading(false);
     }

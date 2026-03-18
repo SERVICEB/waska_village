@@ -3,16 +3,21 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 
-// Connexion à la base de données
+// 1. Connexion à la base de données
 connectDB();
 
 const app = express();
 
-// --- MIDDLEWARES ---
-app.use(cors()); // Accepte les requêtes du Frontend
-app.use(express.json()); // Indispensable pour lire req.body (doit être AVANT les routes)
+// --- 2. MIDDLEWARES ---
+app.use(cors()); 
+app.use(express.json()); 
 
-// --- IMPORT DES ROUTES ---
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// --- 3. IMPORT DES ROUTES ---
 const authRoutes = require('./routes/authRoutes');
 const roomRoutes = require('./routes/roomRoutes');
 const clientRoutes = require('./routes/clientRoutes');
@@ -22,28 +27,52 @@ const activityRoutes = require('./routes/activityRoutes');
 const depenseRoutes = require('./routes/depenseRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const saleRoutes = require('./routes/saleRoutes');
+const stockRoutes = require('./routes/stockRoutes'); 
+const dechargeRoutes = require('./routes/dechargeRoute');
 
-// --- UTILISATION DES ROUTES ---
+// --- 4. UTILISATION DES ROUTES ---
 
+app.use(express.json({ limit: '5mb' })); // Augmente la limite de taille pour les payloads JSON (utile pour les justificatifs encodés en base64)
+app.use(express.urlencoded({ limit: '5mb', extended: true })); // Augmente la limite pour les données encodées en URL (formulaires)
 app.use('/api/auth', authRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/clotures', clotureRoutes);
-app.use('/api/activities', activityRoutes);
 app.use('/api/depenses', depenseRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api', saleRoutes);
+app.use('/api/activities', activityRoutes);
+app.use('/api/decharges', dechargeRoutes);
 
-// ATTENTION : Si tes routes dans saleRoutes sont déjà préfixées par /sales, 
-// utilise /api comme base, sinon utilise /api/sales.
-app.use('/api/sales', saleRoutes); 
+// On fait pointer les deux URLs vers le même fichier de routes
+// Cela permet de gérer le stock (Alertes) et les produits (Caisse) au même endroit
+app.use('/api/stocks', stockRoutes);
+app.use('/api/products', stockRoutes); 
 
-// --- GESTION DES ERREURS ---
-app.get('/', (req, res) => res.send('API Waska Village en ligne...'));
+// --- 5. GESTION DES ERREURS ---
+
+app.get('/', (req, res) => res.send('🚀 API Waska Village v2 - Système Opérationnel'));
 
 app.use((req, res) => {
-  res.status(404).json({ message: `La route ${req.originalUrl} n'existe pas.` });
+  res.status(404).json({ 
+    success: false,
+    message: `La route ${req.originalUrl} n'existe pas.` 
+  });
 });
 
+app.use((err, req, res, next) => {
+  console.error("ERREUR SERVEUR:", err.stack);
+  res.status(500).json({ 
+    success: false, 
+    message: "Une erreur interne est survenue." 
+  });
+});
+
+// --- 6. DÉMARRAGE ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Serveur démarré sur le port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`-------------------------------------------`);
+    console.log(`✅ Serveur Waska Village : Port ${PORT}`);
+    console.log(`-------------------------------------------`);
+});

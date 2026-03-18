@@ -1,42 +1,70 @@
 const mongoose = require('mongoose');
 
-const SaleSchema = new mongoose.Schema({
-  items: [{
-    product: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: 'Product',
-      required: true 
+const saleSchema = new mongoose.Schema({
+    // --- INFOS DE VENTE ---
+    heure: { 
+        type: String, 
+        required: true 
     },
-    name: { type: String, required: true },
-    qty: { type: Number, required: true, default: 1 },
-    price: { type: Number, required: true }
-  }],
-  subTotal: { type: Number, required: true },
-  remise: { type: Number, default: 0 },
-  total: { type: Number, required: true },
-  table: { type: String }, // Optionnel (pour le resto)
-  mode: { 
-    type: String, 
-    enum: ['CASH', 'MOBILE'], 
-    required: true 
-  },
-  type: { 
-    type: String, 
-    enum: ['bar', 'resto'], 
-    required: true 
-  },
-  status: { 
-    type: String, 
-    enum: ['VALIDÉ', 'REMBOURSÉ'], 
-    default: 'VALIDÉ' 
-  },
-  motif: { type: String }, // Motif d'annulation
-  heure: { type: String }  // Format "14:30" pour affichage rapide
-}, { 
-  timestamps: true // Crée automatiquement createdAt et updatedAt
-});
+    type: { 
+        type: String, 
+        required: true, 
+        enum: ['bar', 'resto', 'boutique'] 
+    },
+    table: { 
+        type: String, 
+        default: null 
+    },
+    
+    // --- CONTENU DU PANIER ---
+    items: [{
+        product: { 
+            type: mongoose.Schema.Types.ObjectId, 
+            ref: 'Product' 
+        },
+        name: String,
+        qty: Number,
+        price: Number
+    }],
 
-// Index pour accélérer la recherche par date dans le journal
-SaleSchema.index({ createdAt: -1 });
+    // --- FINANCES ---
+    subTotal: { type: Number, required: true },
+    remise: { type: Number, default: 0 },
+    total: { type: Number, required: true },
+    mode: { 
+        type: String, 
+        enum: ['CASH', 'MOBILE', 'CARTE'], 
+        default: 'CASH' 
+    },
 
-module.exports = mongoose.model('Sale', SaleSchema);
+    // --- STATUT ET TRAÇABILITÉ ---
+    status: { 
+        type: String, 
+        enum: ['VALIDÉ', 'REMBOURSÉ', 'ANNULÉ'], 
+        default: 'VALIDÉ' 
+    },
+    motifAnnulation: { type: String, default: "" },
+    
+    caissierId: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'User' 
+    },
+
+    /**
+     * LE CHAMP CORRECTIF : clotureId
+     * Si ce champ est null, la vente apparaît dans la caisse.
+     * Dès qu'il contient l'ID d'une clôture, elle disparaît de la caisse 
+     * mais reste consultable dans les archives de la RAF.
+     */
+    clotureId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Cloture',
+        default: null
+    }
+
+}, { timestamps: true });
+
+// Index pour accélérer le chargement du journal de caisse
+saleSchema.index({ createdAt: -1, status: 1, clotureId: 1 });
+
+module.exports = mongoose.model('Sale', saleSchema);

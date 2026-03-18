@@ -81,20 +81,25 @@ const Sidebar = () => {
     navigate('/login');
   };
 
-  const menuConfig = {
+    const menuConfig = {
     gerant: [
-      { name: 'Tableau de Bord', path: '/admin', icon: <LayoutDashboard size={20} /> },
-      { name: 'Suivi Trésorerie', path: '/finance', icon: <Wallet size={20} /> },
+      { name: 'Tableau de Bord', path: '/admin-dashboard', icon: <LayoutDashboard size={20} /> },
+      { name: 'Suivi Trésorerie', path: '/finance', icon: <Wallet size={20} /> }, // Pointera vers DechargesPage
       { name: 'Rapports PDF', path: '/rapports', icon: <FileText size={20} /> },
       { name: 'Paramètres', path: '/settings', icon: <Settings size={20} /> },
     ],
     raf: [
-      { name: 'Supervision Live', path: '/DashboardRAF', icon: <LayoutDashboard size={20} /> },
-      { name: 'Décharges & Paies', path: '/finance', icon: <Banknote size={20} /> },
+      // Correction de la faute de frappe ici : admin-dashboard
+      { name: 'Supervision Live', path: '/admin-dashboard', icon: <LayoutDashboard size={20} /> },
+      
+      // On s'assure que ce path correspond à ta route DechargesPage dans App.js
+      { name: 'Décharges & Paies', path: '/finance', icon: <Banknote size={20} /> }, 
+      
       { name: 'Audit & Clôture', path: '/cloture-finale', icon: <ShieldCheck size={20} /> },
       { name: 'Stocks (Lecture)', path: '/stock', icon: <Package size={20} /> },
       { name: 'Rapports PDF', path: '/rapports', icon: <FileText size={20} /> },
     ],
+    // ... reste des rôles inchangés
     reception: [
       {/*--- name: 'Tableau de Bord', path: '/admin', icon: <LayoutDashboard size={20} /> ---*/}, 
       { name: 'Réception & Planning', path: '/reception', icon: <ClipboardList size={20} />, badge: chambresANettoyer },

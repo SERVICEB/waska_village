@@ -1,11 +1,10 @@
 const mongoose = require('mongoose');
 
 const clotureSchema = new mongoose.Schema({
-    // Harmonisé avec le frontend (bar/resto)
     pointDeVente: {
         type: String,
         required: true, 
-        enum: ['Réception', 'bar', 'resto'], // Ajout des minuscules pour matcher ta caisse
+        enum: ['Réception', 'bar', 'resto'], 
         default: 'Réception'
     }, 
     caissier: {
@@ -17,7 +16,11 @@ const clotureSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     },
-    // On aplatit un peu pour plus de flexibilité avec les envois Axios
+    // Champ crucial pour l'affichage rapide sur le Dashboard RAF
+    totalVentes: { 
+        type: Number, 
+        default: 0 
+    },
     stats: {
         theorique: { 
             total: { type: Number, default: 0 },
@@ -36,7 +39,6 @@ const clotureSchema = new mongoose.Schema({
             default: 0 
         }
     },
-    // Pour stocker le détail des ventes (ton tableau de produits)
     details: {
         type: Array,
         default: []
@@ -45,19 +47,23 @@ const clotureSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     }, 
+    statusAudit: { // Ajouté pour matcher ta fonction handleAuditAction
+        type: String,
+        enum: ['Valide', 'Ecart', 'Attente'],
+        default: 'Attente'
+    },
     dateAudite: {
         type: Date
     },
     auditeurNom: { 
         type: String 
     },
-    notes: {
+    noteEcart: { // Harmonisé avec ton frontend
         type: String,
         default: ""
     }
 }, { timestamps: true });
 
-// Indexation pour des recherches rapides
 clotureSchema.index({ createdAt: -1, pointDeVente: 1 });
 
 module.exports = mongoose.model('Cloture', clotureSchema);

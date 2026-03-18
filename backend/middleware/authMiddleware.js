@@ -1,44 +1,54 @@
 const jwt = require('jsonwebtoken'); 
 const User = require('../models/User');
 
-// verifie si l'utilisateur est connecté
+/**
+ * PROTECT : Vérifie si l'utilisateur est authentifié via son Token JWT
+ */
 const protect = async (req, res, next) => {
     let token;
 
-    // on cherche le token dans les headers
+    // 1. On cherche le token dans les headers (format: Bearer <token>)
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         try {
-            // on récupère le token
+            // Extraction du token
             token = req.headers.authorization.split(' ')[1];
 
-            // on vérifie le token
+            // Vérification du token avec la clé secrète
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-            // on récupère l'utilisateur associé au token avaec son mot de passe
+            // On récupère l'utilisateur (sans le mot de passe) et on l'attache à la requête
             req.user = await User.findById(decoded.id).select('-password');
 
-            next(); // on passe au middleware suivant
+            if (!req.user) {
+                return res.status(401).json({ message: 'Utilisateur introuvable' });
+            }
+
+            return next(); // On passe à la suite de la requête
         } catch (error) {
             console.error("Erreur Token:", error);
-            res.status(401).json({ message: 'Token invalide' });
+            return res.status(401).json({ message: 'Token invalide ou expiré' });
         }
     }
 
+    // 2. Si aucun token n'est trouvé
     if (!token) {
-        res.status(401).json({ message: 'Aucun token, accès refusé' });
+        return res.status(401).json({ message: 'Accès refusé : Aucun token fourni' });
     }
 }; 
 
-// verifie si l'utilisateur a le role requis
+/**
+ * AUTHORIZE : Vérifie si l'utilisateur a les permissions nécessaires (ex: 'admin', 'raf')
+ */
 const authorize = (...roles) => {
     return (req, res, next) => {
         if (!req.user || !roles.includes(req.user.role)) {
             return res.status(403).json({
-                message: `le role ${req.user?.role || 'inconnu'} n'est pas autorisé à accéder à cette ressource`
+                message: `Le rôle ${req.user?.role || 'inconnu'} n'est pas autorisé à accéder à cette ressource`
             }); 
         }
         next();
     }; 
 }; 
 
+// On exporte un objet contenant les deux fonctions
 module.exports = { protect, authorize };

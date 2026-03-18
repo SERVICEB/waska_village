@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const mongoose = require('mongoose'); // <--- IL MANQUAIT CETTE LIGNE !
 
 const activitySchema = new mongoose.Schema({
   action: { 
@@ -17,10 +17,9 @@ const activitySchema = new mongoose.Schema({
     enum: ['entree', 'sortie', 'info'], 
     default: 'info' 
   },
-  // --- CHAMP CRUCIAL POUR LA RÉINITIALISATION ---
   archived: {
     type: Boolean,
-    default: false // Par défaut, une nouvelle activité est "active"
+    default: false 
   },
   pointDeVente: {
     type: String,

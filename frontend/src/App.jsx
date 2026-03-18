@@ -12,25 +12,23 @@ import Rapport from './pages/Rapport';
 import DashboardRAF from './pages/DashboardRAF'; 
 import FinanceRAF from './pages/FinanceRAF'; 
 import ClotureFinale from './pages/ClotureFinale'; 
-/*--import SupervisionLive from './pages/SupervisionLive'; // La vue live pour la RAF--*/
 import ProtectedRoute from './components/ProtectedRoute';
+import AddDechargeModal from './pages/AddDechargeModal';
 
 /**
  * AppLayout : Gère la structure visuelle (Sidebar + Contenu)
- * Il se rafraîchit dès que "authTicket" change.
  */
-const AppLayout = ({ children, authTicket }) => {
+const AppLayout = ({ children }) => {
   const location = useLocation();
   const token = localStorage.getItem('userToken');
   const isLoginPage = location.pathname === '/login' || location.pathname === '/';
 
-  // Détection du mode Admin pour adapter la Sidebar
-  const adminRoutes = ['/admin', '/finance', '/cloture-finale', '/rapports', '/admin-dashboard', '/Supervision'];
+  // Routes qui déclenchent le mode "Admin/RAF" dans la Sidebar
+  const adminRoutes = ['/admin-dashboard', '/finance', '/cloture-finale', '/rapports', '/stock'];
   const isAdminSession = adminRoutes.some(route => location.pathname.startsWith(route));
 
   return (
     <div className="flex bg-[#FDFBF9] min-h-screen font-sans">
-      {/* Sidebar affichée uniquement si connecté et hors page login */}
       {!isLoginPage && token && <Sidebar isAdminView={isAdminSession} />}
       
       <main className={`flex-1 transition-all duration-300 ${(!isLoginPage && token) ? 'md:ml-64' : ''}`}>
@@ -41,10 +39,8 @@ const AppLayout = ({ children, authTicket }) => {
 };
 
 function App() {
-  // État de session pour forcer React à redessiner l'app au Login/Logout
   const [session, setSession] = useState(localStorage.getItem('userToken'));
 
-  // Synchronisation avec le localStorage (utile si l'utilisateur ouvre plusieurs onglets)
   useEffect(() => {
     const syncLogout = (e) => {
       if (e.key === 'userToken') setSession(e.newValue);
@@ -52,6 +48,9 @@ function App() {
     window.addEventListener('storage', syncLogout);
     return () => window.removeEventListener('storage', syncLogout);
   }, []);
+
+  // Fonction pour obtenir le rôle actuel proprement
+  const getUserRole = () => (localStorage.getItem('userRole') || '').toLowerCase().trim();
 
   return (
     <Router>
@@ -62,19 +61,24 @@ function App() {
             <Login onLoginSuccess={() => setSession(localStorage.getItem('userToken'))} />
           } />
           
+          {/* REDIRECTION INTELLIGENTE SELON LE RÔLE */}
           <Route path="/" element={
-            session ? <Navigate to="/reception" replace /> : <Navigate to="/login" replace />
+            session ? (
+              getUserRole() === 'raf' 
+                ? <Navigate to="/admin-dashboard" replace /> 
+                : <Navigate to="/reception" replace />
+            ) : <Navigate to="/login" replace />
           } />
 
-          {/* --- ESPACE RÉCEPTION (Staff & Admin) --- */}
+          {/* --- ESPACE RÉCEPTION --- */}
+          {/* Ajout de 'raf' ici pour éviter le blocage de sécurité au login */}
           <Route path="/reception" element={
-            <ProtectedRoute allowedRoles={['reception', 'admin', 'gerant']}>
+            <ProtectedRoute allowedRoles={['reception', 'admin', 'gerant', 'raf']}>
               <Reception />
             </ProtectedRoute>
           } />
-          <Route path="/reservation" element={<Navigate to="/reception" replace />} />
 
-          {/* --- ESPACE CAISSE (Caissiers & Admin) --- */}
+          {/* --- ESPACE CAISSE --- */}
           <Route path="/caisse-resto" element={
             <ProtectedRoute allowedRoles={['caisse-resto', 'admin', 'gerant']}>
               <Caisse type="resto" />
@@ -86,9 +90,9 @@ function App() {
             </ProtectedRoute>
           } />
 
-          {/* --- ESPACE STOCK (Magasiniers & Admin) --- */}
+          {/* --- ESPACE STOCK --- */}
           <Route path="/stock" element={
-            <ProtectedRoute allowedRoles={['stock', 'magasinier', 'admin', `raf`, 'gerant']}>
+            <ProtectedRoute allowedRoles={['stock', 'magasinier', 'admin', 'raf', 'gerant']}>
               <Stock type="Tous" />
             </ProtectedRoute>
           } />
@@ -102,12 +106,12 @@ function App() {
               <DashboardRAF />
             </ProtectedRoute>
           } /> 
-
-          {/* <Route path="/Supervision" element={
-            <ProtectedRoute allowedRoles={['admin', 'raf', 'gerant']}>
-              <SupervisionLive />
+          
+          <Route path="/add-dechargeModal" element={
+            <ProtectedRoute allowedRoles={['admin', 'raf']}>
+              <AddDechargeModal />
             </ProtectedRoute>
-          } /> */}
+          } />
 
           <Route path="/rapports" element={
             <ProtectedRoute allowedRoles={['admin', 'raf', 'gerant']}>
@@ -128,7 +132,11 @@ function App() {
           } />
 
           {/* --- REDIRECTION 404 --- */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={
+            session 
+              ? (getUserRole() === 'raf' ? <Navigate to="/admin-dashboard" replace /> : <Navigate to="/reception" replace />) 
+              : <Navigate to="/login" replace />
+          } />
         </Routes>
       </AppLayout>
     </Router>
