@@ -46,22 +46,24 @@ router.get('/', protect, async (req, res) => {
     }
 });
 
-// --- PATCH : AUDIT (Validation par la RAF) ---
-// C'est cette route qui manquait et causait l'erreur 404
+ // --- PATCH : AUDIT (Validation RAF) - CORRIGÉ ---
 router.patch('/:id/audit', protect, async (req, res) => {
     try {
-        const { statutAudit, notesAudit } = req.body;
+        // On récupère les noms de champs envoyés par le Frontend
+        const { statusAudit, noteEcart } = req.body; 
         
         const clotureAujournee = await Cloture.findByIdAndUpdate(
             req.params.id,
             { 
-                statutAudit, 
-                notesAudit,
-                dateAudit: Date.now(),
-                auditeurId: req.user._id,
-                auditeurNom: req.user.nom || req.user.username
+                $set: {
+                    audite: true, 
+                    statusAudit: statusAudit || 'Valide', // Match le schéma (status avec O)
+                    noteEcart: noteEcart || '',           // Match le schéma
+                    dateAudite: new Date(),
+                    auditeurNom: req.user.nom || req.user.username
+                }
             },
-            { new: true } // Retourne le document modifié
+            { new: true } 
         );
 
         if (!clotureAujournee) {
@@ -74,7 +76,6 @@ router.patch('/:id/audit', protect, async (req, res) => {
         res.status(400).json({ message: err.message });
     }
 });
-
 // --- GET : Détail des ventes d'une clôture (Optionnel mais recommandé) ---
 router.get('/:id/ventes', protect, async (req, res) => {
     try {

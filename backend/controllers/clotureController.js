@@ -149,3 +149,32 @@ exports.auditCloture = async (req, res) => {
         res.status(400).json({ success: false, message: "Échec de l'audit", error: error.message });
     }
 };
+
+// Fichier : controllers/clotureController.js (ou similaire)
+
+exports.getCloturesLive = async (req, res) => {
+  try {
+    // Calcul de la date limite : il y a 48 heures
+    const limiteDate = new Date();
+    limiteDate.setHours(limiteDate.getHours() - 48);
+
+    // LOGIQUE : 
+    // On veut TOUT ce qui n'est pas encore audité (pour ne rien rater)
+    // + Ce qui est audité MAIS qui date de moins de 48h
+    const clotures = await Cloture.find({
+      $or: [
+        { audite: false }, 
+        { 
+          audite: true, 
+          createdAt: { $gte: limiteDate } 
+        }
+      ]
+    })
+    .sort({ createdAt: -1 }) // Les plus récents en haut
+    .limit(50); // Sécurité pour la performance
+
+    res.status(200).json(clotures);
+  } catch (error) {
+    res.status(500).json({ message: "Erreur récupération flux live", error: error.message });
+  }
+};

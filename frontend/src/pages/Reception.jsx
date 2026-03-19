@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import StatsCards from './StatsCards';
-import ClotureModal from './ClotureModal';
+import ClotureForm from './ClotureForm';
 
 const Reception = () => {
   const [activeTab, setActiveTab] = useState('planning'); 
@@ -430,7 +430,7 @@ const Reception = () => {
             <button onClick={() => setShowModal(null)} className="absolute -top-12 right-0 text-white font-black uppercase text-[10px] flex items-center gap-2 hover:text-[#C5A059]">
               <X size={20}/> Fermer
             </button>
-            <ClotureModal 
+            <ClotureForm 
               soldeTheorique={soldeCaisseSession} 
               type="Réception" // <--- Doit correspondre à l'énumération du Backend
               onSuccess={() => { 
@@ -526,21 +526,48 @@ const Reception = () => {
         </div>
       )}
 
-      {/* MODALE DÉPENSE */}
-      {showModal === 'depense' && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-xs rounded-[2rem] p-8 shadow-2xl text-xs">
-            <h2 className="text-lg font-black uppercase text-red-600 mb-6 flex items-center gap-2"><MinusCircle size={20}/> Sortie de Caisse</h2>
-            <form onSubmit={handleAddDepense} className="space-y-4">
-              <input required type="text" placeholder="Motif" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" onChange={e => setFormDepense({...formDepense, motif: e.target.value})}/>
-              <input required type="number" placeholder="Montant" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-xl" onChange={e => setFormDepense({...formDepense, montant: e.target.value})}/>
-              <button type="submit" className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase shadow-lg">Valider</button>
-              <button type="button" onClick={() => setShowModal(null)} className="w-full text-slate-400 font-bold uppercase text-[10px]">Annuler</button>
-            </form>
-          </div>
-        </div>
-      )}
+      
+      {/* MODALE DÉPENSE CORRIGÉE */}
+{showModal === 'depense' && (
+  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+    <div className="bg-white w-full max-w-xs rounded-[2rem] p-8 shadow-2xl text-xs">
+      <h2 className="text-lg font-black uppercase text-red-600 mb-6 flex items-center gap-2">
+        <MinusCircle size={20}/> Sortie de Caisse
+      </h2>
+      <form onSubmit={handleAddDepense} className="space-y-4">
+        {/* CHAMP TYPE (Ex: Achat, Transport, Salaire) */}
+        <input 
+          required 
+          type="text" 
+          placeholder="Type (ex: Transport, Achat...)" 
+          className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" 
+          onChange={e => setFormDepense({...formDepense, type: e.target.value})}
+        />
+        {/* CHAMP BÉNÉFICIAIRE */}
+        <input 
+          required 
+          type="text" 
+          placeholder="Bénéficiaire (Nom de la personne)" 
+          className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold" 
+          onChange={e => setFormDepense({...formDepense, beneficiaire: e.target.value})}
+        />
+        {/* CHAMP MONTANT */}
+        <input 
+          required 
+          type="number" 
+          placeholder="Montant" 
+          className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-black text-xl" 
+          onChange={e => setFormDepense({...formDepense, montant: e.target.value})}
+        />
+        
+        <button type="submit" className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase shadow-lg">Valider</button>
+        <button type="button" onClick={() => setShowModal(null)} className="w-full text-slate-400 font-bold uppercase text-[10px]">Annuler</button>
+      </form>
+    </div>
+  </div>
+)}
 
+      
       {/* MODALE DÉLOGEMENT */}
       {showModal === 'move' && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
