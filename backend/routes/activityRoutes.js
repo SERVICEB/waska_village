@@ -1,55 +1,71 @@
 const express = require('express');
 const router = express.Router();
-const Activity = require('../models/Activity');
+const mongoose = require('mongoose');
 const { protect } = require('../middleware/authMiddleware');
 
-// --- 1. ROUTES FIXES (Toujours en premier pour éviter les conflits) ---
+// ─── SOLUTION CIRCULAIRE ──────────────────────────────────────────────────────
+// On utilise mongoose.model('Activity') au lieu de require('../models/Activity')
+// mongoose.model() lit depuis le registre interne de Mongoose — zéro circulaire possible
+// Condition : models/Activity.js doit être chargé UNE FOIS au démarrage du serveur
+// (il l'est déjà via les controllers qui l'importent directement)
 
-// @desc    Récupérer les 10 dernières activités pour le Dashboard
-// @route   GET /api/activities/recent
+const getActivity = () => mongoose.model('Activity');
+
+// ─── GET /api/activities/recent ───────────────────────────────────────────────
 router.get('/recent', protect, async (req, res) => {
     try {
-        // Utilisation de $ne (not equal) pour inclure les docs sans le champ archived
-        const activities = await Activity.find({ 
-            archived: { $ne: true } 
+        const activities = await getActivity().find({
+            $or: [{ archived: false }, { archived: { $exists: false } }]
         })
         .sort({ createdAt: -1 })
         .limit(10)
-        .lean(); // .lean() améliore les performances et évite les erreurs de structure Mongoose
-
-        res.status(200).json(activities || []);
-    } catch (error) {
-        console.error("ERREUR CRITIQUE /activities/recent :", error.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "Erreur lors du chargement des activités récentes",
-            error: error.message 
-        });
-    }
-});
-
-// --- 2. ROUTES GÉNÉRIQUES ---
-
-// @desc    Récupérer le journal d'activité complet
-// @route   GET /api/activities
-router.get('/', protect, async (req, res) => {
-    try {
-        const limit = req.query.limit ? parseInt(req.query.limit) : 50;
-
-        const activities = await Activity.find({ 
-            archived: { $ne: true } 
-        })
-        .sort({ createdAt: -1 })
-        .limit(limit)
         .lean();
 
         res.status(200).json(activities || []);
     } catch (error) {
-        console.error("ERREUR /activities :", error.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "Erreur serveur lors de la récupération du journal" 
+        console.error('[ACTIVITIES] /recent:', error.message);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── GET /api/activities ──────────────────────────────────────────────────────
+router.get('/', protect, async (req, res) => {
+    try {
+        const filter = req.query.all === 'true'
+            ? {}
+            : { $or: [
+                { archived: false },
+                { archived: { $exists: false } },
+                { archived: null }
+              ]};
+
+        if (req.query.pointDeVente) {
+            filter.pointDeVente = req.query.pointDeVente;
+        }
+
+        const activities = await getActivity().find(filter)
+            .sort({ createdAt: -1 })
+            .limit(parseInt(req.query.limit) || 200)
+            .lean();
+
+        res.status(200).json(activities || []);
+    } catch (error) {
+        console.error('[ACTIVITIES] GET /:', error.message);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── POST /api/activities ─────────────────────────────────────────────────────
+router.post('/', protect, async (req, res) => {
+    try {
+        const activity = await getActivity().create({
+            ...req.body,
+            archived: false
         });
+        res.status(201).json(activity);
+    } catch (error) {
+        console.error('[ACTIVITIES] POST:', error.message);
+        res.status(400).json({ success: false, message: error.message });
     }
 });
 

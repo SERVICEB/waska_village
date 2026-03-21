@@ -1,180 +1,159 @@
 const Cloture = require('../models/Cloture');
 const Activity = require('../models/Activity');
 
-/**
- * @desc    Créer une clôture complète avec archivage des transactions
- * @route   POST /api/clotures
- */
+// ─── CRÉER UNE CLÔTURE + ARCHIVER LES ACTIVITÉS DU PDV ───────────────────────
+// C'est ici que la caisse retombe à zéro côté frontend
 exports.createCloture = async (req, res) => {
     try {
-        // 1. Extraction des données (Flexibilité sur les noms de champs Front-end)
-        const { 
-            type,           // 'bar', 'resto' ou 'reception'
-            pointDeVente,   // Alternative pour type
-            montantEspeces, cash,  // Accepte les deux variantes
-            montantMobile, mobile, // Accepte les deux variantes
-            totalVentes,           // Total déclaré
-            notes 
-        } = req.body;
+        const { type, pointDeVente, cash, mobile, totalVentes, notes } = req.body;
 
-        // Harmonisation des données
         const pdv = type || pointDeVente || 'Réception';
-        const finalCash = Number(cash || montantEspeces || 0);
-        const finalMobile = Number(mobile || montantMobile || 0);
-        const finalTotal = Number(totalVentes || (finalCash + finalMobile));
+        const finalCash  = Number(cash  || 0);
+        const finalMobile = Number(mobile || 0);
+        const finalTotal  = Number(totalVentes || (finalCash + finalMobile));
 
-        // 2. Calcul du Théorique (activités non archivées pour ce PDV spécifique)
-        const activities = await Activity.find({ archived: false, pointDeVente: pdv });
-        
-        const totalEntrees = activities
-            .filter(a => a.type === 'entree')
-            .reduce((sum, a) => sum + (Number(a.montant) || 0), 0);
+        // Helper : normalise les accents pour comparaison robuste
+        // 'Réception' → 'reception', 'réception' → 'reception'
+        const norm = s => (s || '').toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-        const totalSorties = activities
-            .filter(a => a.type === 'sortie')
-            .reduce((sum, a) => sum + (Number(a.montant) || 0), 0);
+        const isReception = norm(pdv).includes('recep');
 
+        // Filtre MongoDB pour trouver les activités du PDV
+        // Pour la Réception, on inclut aussi les activités sans pointDeVente (défaut schéma)
+        const pdvFilter = isReception
+            ? { $or: [
+                { pointDeVente: pdv },           // 'Réception' exact
+                { pointDeVente: 'Réception' },    // fallback accent
+                { pointDeVente: 'Reception' },    // fallback sans accent
+                { pointDeVente: { $exists: false } },
+                { pointDeVente: null },
+                { pointDeVente: '' }
+              ]}
+            : { pointDeVente: pdv };
+
+        // 1. Calcul du solde théorique avant archivage
+        const activities = await Activity.find({ archived: false, ...pdvFilter });
+
+        const totalEntrees   = activities.filter(a => a.type === 'entree').reduce((s, a) => s + (Number(a.montant) || 0), 0);
+        const totalSorties   = activities.filter(a => a.type === 'sortie').reduce((s, a) => s + (Number(a.montant) || 0), 0);
         const totalTheorique = totalEntrees - totalSorties;
 
-        // 3. Préparation de l'objet de clôture
+        // 2. Création de la clôture
         const newCloture = new Cloture({
             pointDeVente: pdv,
-            caissier: req.user ? (req.user.nom || req.user.username) : 'Caissier Auto',
-            caissierId: req.user ? req.user._id : null,
+            caissier:    req.user ? (req.user.nom || req.user.username) : 'Caissier Auto',
+            caissierId:  req.user?._id,
+            totalVentes: finalTotal,
             stats: {
-                theorique: { 
-                    total: totalTheorique,
-                    entrees: totalEntrees,
-                    sorties: totalSorties,
-                    cash: totalTheorique, 
-                    mobile: 0
-                },
-                declare: { 
-                    total: finalTotal,
-                    cash: finalCash,
-                    mobile: finalMobile
-                },
-                ecart: finalTotal - totalTheorique,
-                notes: notes || ""
-            }
+                theorique: { total: totalTheorique, entrees: totalEntrees, sorties: totalSorties },
+                declare:   { total: finalTotal, cash: finalCash, mobile: finalMobile },
+                ecart:     finalTotal - totalTheorique
+            },
+            notes: notes || ''
         });
 
-        // 4. Sauvegarde de la clôture
         await newCloture.save();
 
-        // 5. ARCHIVAGE : Marquer les activités consommées comme traitées
-        // On les lie à l'ID de la clôture pour la traçabilité
-        await Activity.updateMany(
-            { archived: false, pointDeVente: pdv }, 
+        // 3. ARCHIVAGE → toutes les activités du PDV passent à archived: true → caisse = 0
+        const archiveResult = await Activity.updateMany(
+            { archived: false, ...pdvFilter },
             { $set: { archived: true, clotureId: newCloture._id } }
         );
 
-        // 6. Création d'un log système pour l'historique (déjà archivé)
+        // 4. Log de clôture
         await Activity.create({
-            action: `CLÔTURE CAISSE - ${pdv.toUpperCase()}`,
-            details: `Validée par ${req.user ? (req.user.nom || req.user.username) : 'Système'}. Écart: ${finalTotal - totalTheorique} F`,
-            montant: finalTotal,
-            type: 'info',
+            action:       'CLÔTURE EFFECTUÉE',
+            details:      `Caisse ${pdv} fermée par ${newCloture.caissier}. Déclaré: ${finalTotal.toLocaleString('fr-FR')} F | Théorique: ${totalTheorique.toLocaleString('fr-FR')} F | Écart: ${(finalTotal - totalTheorique).toLocaleString('fr-FR')} F`,
+            montant:      finalTotal,
+            type:         'info',
             pointDeVente: pdv,
-            archived: true 
+            archived:     true
         });
 
         res.status(201).json({
             success: true,
-            message: "Clôture réussie et activités archivées",
-            data: newCloture
+            data: newCloture,
+            archived: archiveResult.modifiedCount
         });
-        
+
     } catch (error) {
-        console.error("ERREUR CLOTURE:", error);
-        res.status(400).json({ 
-            success: false,
-            message: "Erreur lors de la création de la clôture", 
-            details: error.message 
-        });
+        console.error('[CLOTURE] Erreur createCloture:', error);
+        res.status(400).json({ success: false, message: error.message });
     }
 };
 
-/**
- * @desc    Récupérer l'historique des clôtures (Audit RAF)
- * @route   GET /api/clotures
- */
+// ─── RÉCUPÉRER LES CLÔTURES ───────────────────────────────────────────────────
 exports.getClotures = async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
-        const clotures = await Cloture.find()
+
+        // Filtre optionnel : ?audite=false pour récupérer uniquement les non auditées
+        const filter = {};
+        if (req.query.audite === 'false') filter.audite = false;
+        if (req.query.audite === 'true')  filter.audite = true;
+        if (req.query.pdv)                filter.pointDeVente = req.query.pdv;
+
+        const clotures = await Cloture.find(filter)
             .sort({ createdAt: -1 })
             .limit(limit);
+
         res.status(200).json(clotures);
-    } catch (error) {
-        res.status(500).json({ success: false, message: "Erreur lors de la récupération" });
+    } catch (err) {
+        console.error('[CLOTURE] Erreur getClotures:', err);
+        res.status(500).json({ message: err.message });
     }
 };
 
-/**
- * @desc    Audit (Validation par le Manager / RAF)
- * @route   PATCH /api/clotures/:id/audit
- */
+// ─── AUDIT INDIVIDUEL (bouton "Signer" RAF) ───────────────────────────────────
 exports.auditCloture = async (req, res) => {
     try {
-        const { id } = req.params;
-        const { statutAudit, notesAudit } = req.body;
+        const { statusAudit, noteEcart } = req.body;
 
-        // Mise à jour avec les options modernes pour éviter les warnings
-        const updatedCloture = await Cloture.findByIdAndUpdate(
-            id, 
-            { 
+        const updated = await Cloture.findByIdAndUpdate(
+            req.params.id,
+            {
                 $set: {
-                    audite: true, 
-                    statutAudit: statutAudit || 'Validé', 
-                    notesAudit: notesAudit || '',
-                    dateAudit: new Date(),
-                    auditeurNom: req.user ? (req.user.nom || req.user.username) : "RAF Waska"
+                    audite:      true,
+                    statutAudit: statusAudit || 'Valide',
+                    notesAudit:  noteEcart   || '',
+                    dateAudit:   new Date(),
+                    auditeurNom: req.user?.nom || req.user?.username
                 }
             },
-            { returnDocument: 'after' } // Remplace new: true
+            { new: true }
         );
 
-        if (!updatedCloture) {
-            return res.status(404).json({ success: false, message: "Clôture introuvable" });
-        }
+        if (!updated) return res.status(404).json({ message: 'Clôture introuvable' });
+        res.status(200).json({ success: true, data: updated });
 
-        res.status(200).json({
-            success: true,
-            message: "Audit enregistré avec succès",
-            data: updatedCloture
-        });
     } catch (error) {
-        console.error("ERREUR AUDIT:", error);
-        res.status(400).json({ success: false, message: "Échec de l'audit", error: error.message });
+        console.error('[CLOTURE] Erreur auditCloture:', error);
+        res.status(400).json({ success: false, error: error.message });
     }
 };
 
-// Fichier : controllers/clotureController.js (ou similaire)
+// ─── AUDIT DE TOUTES LES CLÔTURES (Clôture générale RAF) ─────────────────────
+exports.auditAllClotures = async (req, res) => {
+    try {
+        const { notesAudit } = req.body;
+        const auteur = req.user?.nom || req.user?.username || 'RAF';
 
-exports.getCloturesLive = async (req, res) => {
-  try {
-    // Calcul de la date limite : il y a 48 heures
-    const limiteDate = new Date();
-    limiteDate.setHours(limiteDate.getHours() - 48);
+        await Cloture.updateMany(
+            { audite: false },
+            {
+                $set: {
+                    audite:      true,
+                    dateAudit:   new Date(),
+                    auditeurNom: auteur,
+                    notesAudit:  notesAudit || 'Clôture générale RAF'
+                }
+            }
+        );
 
-    // LOGIQUE : 
-    // On veut TOUT ce qui n'est pas encore audité (pour ne rien rater)
-    // + Ce qui est audité MAIS qui date de moins de 48h
-    const clotures = await Cloture.find({
-      $or: [
-        { audite: false }, 
-        { 
-          audite: true, 
-          createdAt: { $gte: limiteDate } 
-        }
-      ]
-    })
-    .sort({ createdAt: -1 }) // Les plus récents en haut
-    .limit(50); // Sécurité pour la performance
-
-    res.status(200).json(clotures);
-  } catch (error) {
-    res.status(500).json({ message: "Erreur récupération flux live", error: error.message });
-  }
+        res.status(200).json({ success: true, message: 'Toutes les caisses ont été auditées.' });
+    } catch (error) {
+        console.error('[CLOTURE] Erreur auditAllClotures:', error);
+        res.status(400).json({ success: false, error: error.message });
+    }
 };

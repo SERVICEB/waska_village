@@ -1,14 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   ShieldAlert, RefreshCw, TrendingUp, Banknote, Wallet, Home, 
-  ChevronRight, CheckCircle2, Clock, X, Loader2, Package, AlertTriangle
+  ChevronRight, CheckCircle2, Clock, X, Loader2, Package, AlertTriangle,
+  Utensils, Coffee, Hotel
 } from 'lucide-react';
 import axios from 'axios';
 
 const AdminDashboard = () => {
   const [data, setData] = useState({
     clotures: [],
-    stats: { caTotal: 0, depensesTotal: 0, soldeNet: 0, tauxOccupation: 0, chambresDispos: 0 },
+    stats: { 
+      caTotal: 0, 
+      depensesTotal: 0, 
+      soldeNet: 0, 
+      tauxOccupation: 0, 
+      chambresDispos: 0,
+      caParPoint: [] // Nouveau : pour le suivi par caisse
+    },
     alertesStock: [],
     activites: []
   });
@@ -45,13 +53,14 @@ const AdminDashboard = () => {
           depensesTotal: depenses,
           soldeNet: caTotal - depenses,
           tauxOccupation: resVentes.data?.tauxOccupation || 0,
-          chambresDispos: resVentes.data?.chambresDispos || 0
+          chambresDispos: resVentes.data?.chambresDispos || 0,
+          caParPoint: resVentes.data?.parPointDeVente || [] // Données réelles du backend
         },
         alertesStock: resStock.data || [],
         activites: resActivities.data || []
       });
     } catch (err) {
-      console.error("Erreur Sync:", err);
+      console.error("Erreur Sync Admin:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -60,7 +69,7 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     loadLiveStatus();
-    const interval = setInterval(loadLiveStatus, 60000); // Auto-refresh 1min
+    const interval = setInterval(loadLiveStatus, 30000); // Rafraîchissement toutes les 30s pour le "Temps Réel"
     return () => clearInterval(interval);
   }, [loadLiveStatus]);
 
@@ -68,13 +77,11 @@ const AdminDashboard = () => {
     setRefreshing(true);
     try {
       const config = getAuthConfig();
-      // On garde les champs exacts du backend : statusAudit et noteEcart
       await axios.patch(`${API_URL}/clotures/${id}/audit`, {
         statusAudit: status,
         noteEcart: ecartNote || (status === 'Valide' ? "Validé par RAF" : "Écart constaté")
       }, config);
 
-      // Feedback visuel immédiat
       setData(prev => ({
         ...prev,
         clotures: prev.clotures.map(item => 
@@ -120,7 +127,7 @@ const AdminDashboard = () => {
       </div>
 
       {/* KPI GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <StatCard label="Recettes Brutes" value={data.stats.caTotal} color="text-slate-900" icon={<TrendingUp />} />
         <StatCard label="Sorties Caisse" value={data.stats.depensesTotal} color="text-red-500" icon={<Banknote />} />
         <StatCard label="Trésorerie Net" value={data.stats.soldeNet} color="text-emerald-600" icon={<Wallet />} />
@@ -134,13 +141,44 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      {/* LIVE MONITORING PAR CAISSE */}
+      <div className="mb-10">
+          <h3 className="text-[10px] font-black uppercase text-slate-400 mb-4 tracking-[0.2em] flex items-center gap-2">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div> 
+              Flux Direct par Caisse
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { id: 'Réception', label: 'Réception / Hôtel', icon: <Hotel size={18}/>, color: 'blue' },
+                { id: 'resto', label: 'Restaurant', icon: <Utensils size={18}/>, color: 'orange' },
+                { id: 'bar', label: 'Bar Lounge', icon: <Coffee size={18}/>, color: 'purple' }
+              ].map((pvd) => {
+                  const statsPvd = data.stats.caParPoint.find(p => p._id === pvd.id);
+                  return (
+                      <div key={pvd.id} className="bg-white p-5 rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-all">
+                          <div className="flex items-center gap-3">
+                              <div className={`p-3 rounded-2xl bg-${pvd.color}-50 text-${pvd.color}-600`}>
+                                  {pvd.icon}
+                              </div>
+                              <div>
+                                  <p className="text-[9px] font-black uppercase text-slate-400">{pvd.label}</p>
+                                  <p className="text-lg font-black italic">{(statsPvd?.total || 0).toLocaleString()} F</p>
+                              </div>
+                          </div>
+                          <div className="text-[8px] font-black text-emerald-500 bg-emerald-50 px-2 py-1 rounded-md">EN LIGNE</div>
+                      </div>
+                  )
+              })}
+          </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         {/* TABLEAU DES CLÔTURES */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
-                <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest text-[10px]">Historique Récent (48h)</h3>
+                <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest text-[10px]">Historique Récent (Audit)</h3>
                 <select 
                   className="text-[10px] font-black uppercase border-none bg-white shadow-sm ring-1 ring-slate-100 rounded-lg px-3 py-2 outline-none text-[#386D7F]"
                   onChange={(e) => setFilter(e.target.value)}
@@ -163,7 +201,6 @@ const AdminDashboard = () => {
                         <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">{new Date(report.createdAt).toLocaleString()}</p>
                       </td>
                       <td className="p-6">
-                        {/* LOGIQUE CODE COULEUR POINT DE VENTE */}
                         <span className={`text-[9px] font-black uppercase px-4 py-1.5 rounded-full shadow-sm text-white ${
                           report.pointDeVente === 'Réception' ? 'bg-blue-600' : 
                           report.pointDeVente === 'bar' ? 'bg-purple-500' : 'bg-orange-500'
@@ -173,13 +210,12 @@ const AdminDashboard = () => {
                       </td>
                       <td className="p-6">
                         {report.audite ? (
-                           <div className="flex items-center gap-2 text-emerald-500 font-black text-[9px] uppercase"><CheckCircle2 size={14} /> Audité</div>
+                            <div className="flex items-center gap-2 text-emerald-500 font-black text-[9px] uppercase"><CheckCircle2 size={14} /> Audité</div>
                         ) : (
                           <div className="flex items-center gap-2 text-amber-500 font-black text-[9px] uppercase animate-pulse"><Clock size={14} /> En attente</div>
                         )}
                       </td>
                       <td className="p-6 text-right font-black italic text-slate-800 text-sm">
-                        {/* FIX 0 F : On vérifie les deux champs possibles du backend */}
                         {(report.totalVentes || report.stats?.declare?.total || 0).toLocaleString()} <span className="text-[10px] opacity-30 not-italic ml-1">F</span>
                       </td>
                       <td className="p-6 text-right">
@@ -229,8 +265,8 @@ const AdminDashboard = () => {
 
       {/* MODALE D'AUDIT RAF */}
       {selectedReport && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4 animate-in fade-in duration-300">
-          <div className="bg-white rounded-[3.5rem] p-10 max-w-md w-full shadow-2xl relative animate-in zoom-in duration-300">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+          <div className="bg-white rounded-[3.5rem] p-10 max-w-md w-full shadow-2xl relative">
             <button onClick={() => setSelectedReport(null)} className="absolute top-8 right-8 text-slate-300 hover:text-red-500"><X /></button>
             
             <div className="flex flex-col items-center text-center mb-8">
@@ -280,7 +316,6 @@ const AdminDashboard = () => {
   );
 };
 
-// COMPOSANT CARTE STATS
 const StatCard = ({ label, value, color, icon }) => (
   <div className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden hover:border-[#386D7F]/20 transition-all">
     <div className="absolute -right-4 -top-4 text-slate-100 transform group-hover:scale-110 group-hover:rotate-12 transition-all">

@@ -95,7 +95,7 @@ const Sidebar = () => {
       // On s'assure que ce path correspond à ta route DechargesPage dans App.js
       { name: 'Décharges & Paies', path: '/finance', icon: <Banknote size={20} /> }, 
       
-      { name: 'Audit & Clôture', path: '/cloture-finale', icon: <ShieldCheck size={20} /> },
+     //{ name: 'Audit & Clôture', path: '/cloture-finale', icon: <ShieldCheck size={20} /> },
       { name: 'Stocks (Lecture)', path: '/stock', icon: <Package size={20} /> },
       { name: 'Rapports PDF', path: '/rapports', icon: <FileText size={20} /> },
     ],

@@ -12,6 +12,7 @@ if (!getDashboardStats || !getVentesGlobales) {
 router.get('/dashboard', protect, getDashboardStats);
 
 // C'est probablement cette ligne qui plantait si getVentesGlobales était undefined
+//router.get('/ventes-globales', authMiddleware, statsController.getVentesGlobales);
 router.get('/ventes-globales', protect, getVentesGlobales);
 
 module.exports = router;

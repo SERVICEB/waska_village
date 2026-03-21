@@ -1,49 +1,56 @@
 const Reservation = require('../models/Reservation');
 const Room = require('../models/Room');
-const Activity = require('../models/Activity'); // Pour le journal
+const Activity = require('../models/Activity');
 
-// @desc    Créer une réservation ou un Walk-in
+// ─── CRÉER UNE RÉSERVATION / WALK-IN ─────────────────────────────────────────
 exports.createReservation = async (req, res) => {
     try {
-        const { client, room, nights, deposit, status, dateArrivee } = req.body;
+        const { client, room, nights, deposit, status, dateArrivee, pointDeVente } = req.body;
 
-        // 1. Calculer le prix total basé sur la chambre
         const selectedRoom = await Room.findById(room);
-        if (!selectedRoom) return res.status(404).json({ message: "Chambre non trouvée" });
-        
-        const roomPriceTotal = selectedRoom.price * nights;
+        if (!selectedRoom) return res.status(404).json({ message: 'Chambre non trouvée' });
 
-        // 2. Créer la réservation
+        const roomPriceTotal = selectedRoom.price * Number(nights || 1);
+        const finalDeposit   = Number(deposit || 0);
+        const pdv            = pointDeVente || 'Réception';
+
         const reservation = await Reservation.create({
             client,
             room,
-            nights,
-            deposit,
+            nights:       Number(nights || 1),
+            deposit:      finalDeposit,
             status,
             dateArrivee,
-            roomPriceTotal
+            roomPriceTotal,
+            pointDeVente: pdv
         });
 
-        // 3. Si c'est une arrivée directe (Occupé), on bloque la chambre
+        // Bloquer la chambre si arrivée directe
         if (status === 'Occupé') {
             await Room.findByIdAndUpdate(room, { status: 'Occupée' });
         }
 
-        // 4. Ajouter au journal d'activité
-        await Activity.create({
-            action: status === 'Occupé' ? "ARRIVÉE DIRECTE" : "RÉSERVATION",
-            details: `Client ID: ${client} - CH ${selectedRoom.number}`,
-            montant: deposit,
-            type: 'entree'
-        });
+        // ── Activité : encaissement du dépôt/acompte ──────────────────────
+        // Seulement si un montant est versé — type 'entree' pour entrer dans le solde
+        if (finalDeposit > 0) {
+            await Activity.create({
+                action:       status === 'Occupé' ? 'ARRIVÉE DIRECTE' : 'ACOMPTE RÉSERVATION',
+                details:      `${status === 'Occupé' ? 'Walk-in' : 'Acompte'} CH ${selectedRoom.number} — ${finalDeposit.toLocaleString('fr-FR')} F`,
+                montant:      finalDeposit,
+                type:         'entree',      // ← clé : compté dans le solde caisse
+                pointDeVente: pdv,           // ← clé : 'Réception' pour le filtre frontend
+                archived:     false
+            });
+        }
 
         res.status(201).json(reservation);
     } catch (error) {
+        console.error('[RESA] createReservation:', error);
         res.status(400).json({ message: error.message });
     }
 };
 
-// @desc    Récupérer toutes les réservations avec détails (Populate)
+// ─── RÉCUPÉRER TOUTES LES RÉSERVATIONS ───────────────────────────────────────
 exports.getReservations = async (req, res) => {
     try {
         const reservations = await Reservation.find()
@@ -56,22 +63,24 @@ exports.getReservations = async (req, res) => {
     }
 };
 
-// @desc    Valider une arrivée (Check-in)
+// ─── CHECK-IN ─────────────────────────────────────────────────────────────────
 exports.checkIn = async (req, res) => {
     try {
         const reservation = await Reservation.findById(req.params.id).populate('room');
-        if (!reservation) return res.status(404).json({ message: "Introuvable" });
+        if (!reservation) return res.status(404).json({ message: 'Réservation introuvable' });
 
         reservation.status = 'Occupé';
         await reservation.save();
-
-        // Bloquer la chambre
         await Room.findByIdAndUpdate(reservation.room._id, { status: 'Occupée' });
 
+        // type 'info' → non compté dans le solde caisse
         await Activity.create({
-            action: "CHECK-IN",
-            details: `Validation arrivée CH ${reservation.room.number}`,
-            type: 'info'
+            action:       'CHECK-IN',
+            details:      `Arrivée confirmée CH ${reservation.room.number}`,
+            montant:      0,
+            type:         'info',
+            pointDeVente: reservation.pointDeVente || 'Réception',
+            archived:     false
         });
 
         res.status(200).json(reservation);
@@ -80,53 +89,81 @@ exports.checkIn = async (req, res) => {
     }
 };
 
-// @desc    Check-out final (Encaisser et libérer)
+// ─── CHECK-OUT ────────────────────────────────────────────────────────────────
 exports.checkOut = async (req, res) => {
     try {
-        const { discount } = req.body;
+        const { discount, pointDeVente } = req.body;
         const reservation = await Reservation.findById(req.params.id).populate('room');
+        if (!reservation) return res.status(404).json({ message: 'Réservation introuvable' });
 
-        const resteAPayer = reservation.roomPriceTotal - reservation.deposit - (discount || 0);
+        const remise      = Number(discount || 0);
+        const resteAPayer = Math.max(0, (reservation.roomPriceTotal || 0) - (reservation.deposit || 0) - remise);
+        const pdv         = pointDeVente || reservation.pointDeVente || 'Réception';
 
-        reservation.status = 'Terminé';
-        reservation.discount = discount || 0;
-        await reservation.save();
+        // Utiliser updateOne pour éviter les erreurs de champs non définis dans le schéma
+        await Reservation.findByIdAndUpdate(
+            req.params.id,
+            { $set: { status: 'Terminé', ...(remise > 0 ? { discount: remise } : {}) } },
+            { strict: false } // accepte les champs non déclarés dans le schéma
+        );
 
-        // Libérer la chambre (elle passe en Sale pour le ménage)
         await Room.findByIdAndUpdate(reservation.room._id, { status: 'Sale' });
 
-        // Journaliser l'encaissement final
-        await Activity.create({
-            action: "ENCAISSEMENT FINAL",
-            details: `Check-out CH ${reservation.room.number}`,
-            montant: resteAPayer,
-            type: 'entree'
-        });
+        // Encaissement du solde final → type 'entree' → compté dans le solde
+        if (resteAPayer > 0) {
+            await Activity.create({
+                action:       'ENCAISSEMENT FINAL',
+                details:      `Check-out CH ${reservation.room.number}${remise > 0 ? ` — remise ${remise.toLocaleString('fr-FR')} F` : ''}`,
+                montant:      resteAPayer,
+                type:         'entree',
+                pointDeVente: pdv,
+                archived:     false
+            });
+        } else {
+            await Activity.create({
+                action:       'CHECK-OUT',
+                details:      `CH ${reservation.room.number} libérée — solde soldé`,
+                montant:      0,
+                type:         'info',
+                pointDeVente: pdv,
+                archived:     false
+            });
+        }
 
-        res.status(200).json({ message: "Check-out réussi" });
+        res.status(200).json({ success: true, message: 'Check-out réussi', resteAPayer });
     } catch (error) {
+        console.error('[RESA] checkOut:', error);
         res.status(400).json({ message: error.message });
     }
 };
 
-// @desc    Déloger (Changer de chambre)
+// ─── DÉLOGER ──────────────────────────────────────────────────────────────────
 exports.moveRoom = async (req, res) => {
     try {
         const { newRoomId } = req.body;
-        const resa = await Reservation.findById(req.params.id);
-        const oldRoomId = resa.room;
+        const resa = await Reservation.findById(req.params.id).populate('room');
+        if (!resa) return res.status(404).json({ message: 'Réservation introuvable' });
 
-        // 1. Libérer l'ancienne (Sale) et occuper la nouvelle
-        await Room.findByIdAndUpdate(oldRoomId, { status: 'Sale' });
-        const newRoom = await Room.findByIdAndUpdate(newRoomId, { status: 'Occupée' });
+        const oldNumber = resa.room.number;
+        await Room.findByIdAndUpdate(resa.room._id, { status: 'Sale' });
+        const newRoom = await Room.findByIdAndUpdate(newRoomId, { status: 'Occupée' }, { new: true });
 
-        // 2. Mettre à jour la résa et le prix
-        resa.room = newRoomId;
+        resa.room           = newRoomId;
         resa.roomPriceTotal = newRoom.price * resa.nights;
         await resa.save();
 
+        await Activity.create({
+            action:       'CHANGEMENT CHAMBRE',
+            details:      `CH ${oldNumber} → CH ${newRoom.number}`,
+            montant:      0,
+            type:         'info',
+            pointDeVente: resa.pointDeVente || 'Réception',
+            archived:     false
+        });
+
         res.status(200).json(resa);
     } catch (error) {
+        console.error('[RESA] moveRoom:', error);
         res.status(400).json({ message: error.message });
     }
 };

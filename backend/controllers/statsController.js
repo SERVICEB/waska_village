@@ -1,102 +1,102 @@
-const Reservation = require('../models/Reservation');
-const Decharge = require('../models/Decharge'); // Modèle actualisé pour les sorties cash
-const Room = require('../models/Room');
-const Cloture = require('../models/Cloture'); // Importé pour les ventes globales
+const mongoose = require('mongoose');
 
-// --- 1. STATS DU DASHBOARD PRINCIPAL ---
+// ─── Chargement via registre Mongoose — zéro circulaire possible ──────────────
+// Les modèles sont enregistrés au démarrage par leurs propres fichiers models/
+const getReservation = () => mongoose.model('Reservation');
+const getDecharge    = () => mongoose.model('Decharge');
+const getRoom        = () => mongoose.model('Room');
+const getCloture     = () => mongoose.model('Cloture');
+const getActivity    = () => mongoose.model('Activity');
+
+// ─── 1. STATS DU DASHBOARD PRINCIPAL ─────────────────────────────────────────
 exports.getDashboardStats = async (req, res) => {
     try {
-        // --- A. CALCUL DU REVENU (Réservations Hôtel) ---
-        // On calcule les acomptes encaissés + les soldes des réservations terminées
-        const revenuStats = await Reservation.aggregate([
+        const Cloture  = getCloture();
+        const Decharge = getDecharge();
+        const Room     = getRoom();
+
+        // CA : clôtures non encore auditées par le RAF
+        const revenuClotures = await Cloture.aggregate([
+            { $match: { audite: false } },
+            { $group: { _id: null, totalGlobal: { $sum: '$totalVentes' } } }
+        ]);
+        const caReel = revenuClotures[0]?.totalGlobal || 0;
+
+        // Dépenses : décharges non archivées
+        const depenseStats = await Decharge.aggregate([
+            { $match: { archived: { $ne: true } } },
+            { $group: { _id: null, total: { $sum: '$montant' } } }
+        ]);
+        const depensesTotal = depenseStats[0]?.total || 0;
+
+        // Chambres
+        const allRooms    = await Room.find({});
+        const totalRooms  = allRooms.length;
+        const occupiedRooms = allRooms.filter(r => {
+            const s = (r.status || '').toLowerCase().trim();
+            return ['occupée', 'occupe', 'reservée', 'reserved'].includes(s);
+        }).length;
+
+        res.status(200).json({
+            success: true,
+            data: {
+                caTotal:         caReel,
+                depensesTotal:   depensesTotal,
+                soldeNet:        caReel - depensesTotal,
+                tauxOccupation:  parseFloat((totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0).toFixed(1)),
+                chambresDispos:  totalRooms - occupiedRooms,
+                totalRooms,
+                occupiedRooms
+            }
+        });
+    } catch (error) {
+        console.error('[STATS] getDashboardStats:', error.message);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ─── 2. VENTES GLOBALES LIVE (monitoring par PDV) ────────────────────────────
+exports.getVentesGlobales = async (req, res) => {
+    try {
+        const Cloture = getCloture();
+        const Room    = getRoom();
+
+        const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay   = new Date(); endOfDay.setHours(23, 59, 59, 999);
+
+        // Clôtures du jour non encore auditées, groupées par PDV
+        const statsParPoint = await Cloture.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: startOfDay, $lte: endOfDay },
+                    audite: false
+                }
+            },
             {
                 $group: {
-                    _id: null,
-                    totalAcomptes: { $sum: "$deposit" },
-                    totalSoldesTermines: {
-                        $sum: {
-                            $cond: [
-                                { $eq: ["$status", "Terminé"] },
-                                { $subtract: [{ $subtract: ["$roomPriceTotal", "$deposit"] }, "$discount"] },
-                                0
-                            ]
-                        }
-                    }
+                    _id:   '$pointDeVente',
+                    total: { $sum: '$totalVentes' }
                 }
             }
         ]);
 
-        let caHotel = revenuStats.length > 0 
-            ? (revenuStats[0].totalAcomptes + revenuStats[0].totalSoldesTermines) 
-            : 0;
+        const totalGeneral = statsParPoint.reduce((s, i) => s + i.total, 0);
 
-        // --- B. CALCUL DES DÉPENSES (Sorties Cash FinanceRAF) ---
-        const depenseStats = await Decharge.aggregate([
-            { 
-                $group: { 
-                    _id: null, 
-                    total: { $sum: "$montant" } 
-                } 
-            }
-        ]);
-        const depensesTotal = depenseStats.length > 0 ? depenseStats[0].total : 0;
-
-        // --- C. ÉTAT DES CHAMBRES ---
         const allRooms = await Room.find({});
         const totalRooms = allRooms.length;
-        
-        const occupiedRooms = allRooms.filter(room => {
-            const status = room.status ? room.status.toLowerCase().trim() : '';
-            return status === 'occupée' || status === 'occupe' || status === 'reservée' || status === 'reserved';
-        }).length;
-
-        const availableRoomsCount = totalRooms - occupiedRooms;
-        const occupationRate = totalRooms > 0 ? (occupiedRooms / totalRooms) * 100 : 0;
-
-        // --- D. RÉPONSE SYNCHRONISÉE ---
-        res.status(200).json({
-            success: true,
-            data: {
-                caTotal: caHotel,
-                depensesTotal: depensesTotal,
-                soldeNet: caHotel - depensesTotal,
-                tauxOccupation: parseFloat(occupationRate.toFixed(1)),
-                chambresDispos: availableRoomsCount,
-                totalRooms: totalRooms,
-                occupiedRooms: occupiedRooms
-            }
-        });
-
-    } catch (error) {
-        console.error("Erreur Stats Dashboard détaillée:", error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Erreur serveur lors du calcul des statistiques",
-            error: error.message 
-        });
-    }
-};
-
-// --- 2. CALCUL DES VENTES GLOBALES (Pour Finance Hub / Admin Hub) ---
-// Cette fonction corrige l'erreur 404 rencontrée précédemment
-exports.getVentesGlobales = async (req, res) => {
-    try {
-        // On récupère le cumul de CA de toutes les clôtures (Bar, Resto, Réception)
-        const result = await Cloture.aggregate([
-            { $group: { _id: null, total: { $sum: "$totalVentes" } } }
-        ]);
-
-        const totalVentes = result.length > 0 ? result[0].total : 0;
+        const occupied   = allRooms.filter(r =>
+            ['occupée', 'occupe', 'reservée', 'reserved'].includes((r.status || '').toLowerCase().trim())
+        ).length;
 
         res.status(200).json({
-            success: true,
-            total: totalVentes
+            success:         true,
+            total:           totalGeneral,
+            parPointDeVente: statsParPoint,
+            tauxOccupation:  parseFloat((totalRooms > 0 ? (occupied / totalRooms) * 100 : 0).toFixed(1)),
+            chambresDispos:  totalRooms - occupied
         });
     } catch (error) {
-        console.error("Erreur Ventes Globales:", error);
-        res.status(500).json({ 
-            success: false, 
-            message: "Erreur lors de la récupération des ventes globales" 
-        });
+        console.error('[STATS] getVentesGlobales:', error.message);
+        res.status(500).json({ success: false, message: error.message });
     }
 };

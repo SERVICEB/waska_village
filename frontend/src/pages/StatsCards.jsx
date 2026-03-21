@@ -43,20 +43,20 @@ const StatsCards = () => {
 
   // On prépare les étiquettes avec des fallback au cas où
   const cards = [
-    { 
-      label: "Chiffre d'Affaires", 
+    /*--
+      la{bel: "Chiffre d'Affaires", 
       value: `${(stats.caTotal || 0).toLocaleString()} F`, 
       icon: <TrendingUp className="text-emerald-600" size={20} />, 
       bg: "bg-emerald-50",
       textColor: "text-emerald-700"
-    },
-    { 
+    },*/
+    /*--{ 
       label: "Solde Net Caisse", 
       value: `${(stats.soldeNet || 0).toLocaleString()} F`, 
       icon: <Wallet className="text-blue-600" size={20} />, 
       bg: "bg-blue-50",
       textColor: "text-blue-700"
-    },
+    },*/
     { 
       label: "Taux d'Occupation", 
       value: `${Math.round(stats.tauxOccupation || 0)}%`, 
