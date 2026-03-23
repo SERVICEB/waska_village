@@ -1,16 +1,24 @@
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
-const Cloture = require('../models/Cloture');
+const Cloture  = require('../models/Cloture');
 const Activity = require('../models/Activity');
 const Decharge = require('../models/Decharge');
 
-// ─── UTILITAIRE : ARCHIVAGE COMPLET ──────────────────────────────────────────
-const archiveAll = async (auteur = 'Système') => {
+// ─── RÈGLE MÉTIER ─────────────────────────────────────────────────────────────
+// archived:true  → posé UNIQUEMENT par force-reset (bouton "Nouvelle Journée")
+//                  C'est le seul marqueur qui remet les compteurs à zéro dans Rapport
+// audite:true    → posé par la supervision RAF (valider/rejeter une clôture)
+//                  N'affecte PAS le rapport, n'efface PAS les données
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── UTILITAIRE : ARCHIVAGE COMPLET (Nouvelle Journée) ───────────────────────
+const archiveAll = async () => {
     const [cloturesResult, activitiesResult, dechargesResult] = await Promise.all([
+        // Marque TOUTES les clôtures non encore archivées (peu importe audite)
         Cloture.updateMany(
-            { audite: false },
-            { $set: { audite: true, dateAudit: new Date() } }
+            { archived: { $ne: true } },
+            { $set: { archived: true, dateArchive: new Date() } }
         ),
         Activity.updateMany(
             { archived: false },
@@ -24,47 +32,49 @@ const archiveAll = async (auteur = 'Système') => {
     return { cloturesResult, activitiesResult, dechargesResult };
 };
 
-// ─── 1. STATISTIQUES POUR DASHBOARD ─────────────────────────────────────────
+// ─── 1. STATISTIQUES POUR DASHBOARD RAF ──────────────────────────────────────
+// Retourne uniquement ce qui n'est PAS encore archivé (depuis la dernière Nouvelle Journée)
 exports.getGlobalStats = async (req, res) => {
     try {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-
+        // CA : clôtures NON archivées (indépendant de audite)
         const salesByPDV = await Cloture.aggregate([
-            { $match: { audite: false, createdAt: { $gte: startOfDay } } },
-            { $group: { _id: "$pointDeVente", total: { $sum: "$totalVentes" } } }
+            { $match: { archived: { $ne: true } } },
+            { $group: { _id: '$pointDeVente', total: { $sum: '$totalVentes' } } }
         ]);
         const totalCA = salesByPDV.reduce((sum, item) => sum + item.total, 0);
 
+        // Dépenses activités non archivées
         const depActiv = await Activity.find({ type: 'sortie', archived: false });
         const totalDepActiv = depActiv.reduce((s, i) => s + (i.montant || 0), 0);
 
+        // Dépenses décharges non archivées
         const depDecharge = await Decharge.find({ archived: false });
         const totalDepDecharge = depDecharge.reduce((s, i) => s + (i.montant || 0), 0);
 
         const totalDepenses = totalDepActiv + totalDepDecharge;
 
+        // Top produits non archivés
         const topProduits = await Activity.aggregate([
             { $match: { type: 'entree', archived: false } },
-            { $group: { _id: "$details", qty: { $sum: 1 }, rev: { $sum: "$montant" } } },
+            { $group: { _id: '$details', qty: { $sum: 1 }, rev: { $sum: '$montant' } } },
             { $sort: { rev: -1 } },
             { $limit: 5 }
         ]);
 
         res.status(200).json({
-            caTotal: totalCA,
-            depenses: totalDepenses,
-            benefice: totalCA - totalDepenses,
+            caTotal:   totalCA,
+            depenses:  totalDepenses,
+            benefice:  totalCA - totalDepenses,
             ventesParEntite: salesByPDV.map(s => ({
-                name: s._id || 'Autres',
+                name:  s._id || 'Autres',
                 value: s.total,
                 color: s._id?.toLowerCase() === 'réception' ? 'bg-slate-400' :
                        s._id?.toLowerCase() === 'bar'        ? 'bg-[#D17A61]' : 'bg-[#386D7F]'
             })),
             topProduits: topProduits.map(p => ({
                 name: p._id || 'Prestation',
-                qty: p.qty,
-                rev: p.rev
+                qty:  p.qty,
+                rev:  p.rev
             }))
         });
     } catch (error) {
@@ -82,13 +92,8 @@ exports.generateDailyReport = async (req, res) => {
 
         if (!fs.existsSync(directoryPath)) fs.mkdirSync(directoryPath, { recursive: true });
 
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-
-        let clotures = await Cloture.find({ audite: false }).lean();
-        if (clotures.length === 0) {
-            clotures = await Cloture.find({ createdAt: { $gte: startOfDay } }).lean();
-        }
+        // Clôtures non archivées (toutes, peu importe audite)
+        const clotures = await Cloture.find({ archived: { $ne: true } }).lean();
 
         const depActivites = await Activity.find({ type: 'sortie', archived: false }).lean();
         const depDecharges = await Decharge.find({ archived: false }).lean();
@@ -106,6 +111,7 @@ exports.generateDailyReport = async (req, res) => {
         doc.pipe(fileStream);
         doc.pipe(res);
 
+        // En-tête
         doc.fillColor('#0F4C3A').fontSize(28).font('Helvetica-Bold').text('WASKA VILLAGE', { align: 'center' });
         doc.fillColor('#386D7F').fontSize(11).font('Helvetica')
            .text(`Rapport d'Audit — ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`, { align: 'center' });
@@ -113,6 +119,7 @@ exports.generateDailyReport = async (req, res) => {
         doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').lineWidth(1).stroke();
         doc.moveDown(1.5);
 
+        // Recettes
         let totalRecettes = 0;
         doc.fillColor('#0F4C3A').fontSize(13).font('Helvetica-Bold').text('RECETTES PAR CAISSE');
         doc.moveDown(0.5);
@@ -130,13 +137,12 @@ exports.generateDailyReport = async (req, res) => {
         doc.moveDown(0.5);
         doc.fillColor('#0F4C3A').font('Helvetica-Bold').fontSize(11)
            .text(`  TOTAL RECETTES : +${totalRecettes.toLocaleString('fr-FR')} F`, { align: 'right' });
-
         doc.moveDown(1.5);
         doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
         doc.moveDown(1);
 
+        // Dépenses
         let totalDep = 0;
-
         if (depActivites.length > 0) {
             doc.fillColor('#C0392B').fontSize(13).font('Helvetica-Bold').text('DÉPENSES OPÉRATIONNELLES');
             doc.moveDown(0.5);
@@ -176,7 +182,6 @@ exports.generateDailyReport = async (req, res) => {
 
         doc.fillColor('#C0392B').font('Helvetica-Bold').fontSize(11)
            .text(`  TOTAL DÉPENSES : −${totalDep.toLocaleString('fr-FR')} F`, { align: 'right' });
-
         doc.moveDown(1.5);
         doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#0F4C3A').lineWidth(1).stroke();
         doc.moveDown(1);
@@ -190,8 +195,9 @@ exports.generateDailyReport = async (req, res) => {
 
         doc.end();
 
+        // Archive tout après génération du PDF
         fileStream.on('finish', async () => {
-            try { await archiveAll(req.user?.nom || req.user?.username); }
+            try { await archiveAll(); }
             catch (e) { console.error('[REPORT] Erreur archivage post-PDF:', e); }
         });
 
@@ -208,15 +214,16 @@ exports.forceResetData = async (req, res) => {
         const auteur = req.user?.nom || req.user?.username || 'RAF';
 
         if (fullReset) {
-            const { cloturesResult, activitiesResult, dechargesResult } = await archiveAll(auteur);
+            const { cloturesResult, activitiesResult, dechargesResult } = await archiveAll();
 
+            // Log système horodaté
             await Activity.create({
-                action: 'RÉINITIALISATION JOURNÉE',
-                details: `Nouvelle journée par ${auteur}. ${cloturesResult.modifiedCount} clôtures, ${activitiesResult.modifiedCount} activités, ${dechargesResult.modifiedCount} décharges archivées. Note: ${note || 'RAS'}`,
-                montant: 0,
-                type: 'info',
+                action:       'RÉINITIALISATION JOURNÉE',
+                details:      `Nouvelle journée par ${auteur}. ${cloturesResult.modifiedCount} clôtures, ${activitiesResult.modifiedCount} activités, ${dechargesResult.modifiedCount} décharges archivées. Note: ${note || 'RAS'}`,
+                montant:      0,
+                type:         'info',
                 pointDeVente: 'Système',
-                archived: true
+                archived:     true
             });
 
             return res.status(200).json({
@@ -230,7 +237,8 @@ exports.forceResetData = async (req, res) => {
             });
         }
 
-        await archiveAll(auteur);
+        // Reset partiel (fallback sans fullReset)
+        await archiveAll();
         res.status(200).json({ success: true, message: 'Données archivées.' });
 
     } catch (error) {
@@ -245,7 +253,6 @@ exports.getArchivedReports = async (req, res) => {
         const directoryPath = path.join(__dirname, '../storage/reports');
         if (!fs.existsSync(directoryPath)) return res.json([]);
 
-        // Filtre optionnel par date : ?from=2025-01-01&to=2025-12-31
         const { from, to } = req.query;
 
         const files = fs.readdirSync(directoryPath)
@@ -254,16 +261,16 @@ exports.getArchivedReports = async (req, res) => {
 
         const reports = files.map(filename => {
             const filePath = path.join(directoryPath, filename);
-            const stats = fs.statSync(filePath);
-            const match = filename.match(/(\d{4}-\d{2}-\d{2})/);
-            const dateStr = match ? match[1] : null;
+            const stats    = fs.statSync(filePath);
+            const match    = filename.match(/(\d{4}-\d{2}-\d{2})/);
+            const dateStr  = match ? match[1] : null;
             return {
                 filename,
-                date: dateStr,
+                date:          dateStr,
                 dateFormatted: dateStr
                     ? new Date(dateStr).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
                     : 'Date inconnue',
-                sizeKo: Math.round(stats.size / 1024),
+                sizeKo:    Math.round(stats.size / 1024),
                 createdAt: stats.birthtime || stats.mtime,
             };
         }).filter(r => {
@@ -280,11 +287,9 @@ exports.getArchivedReports = async (req, res) => {
 };
 
 // ─── 5. TÉLÉCHARGEMENT D'UN RAPPORT ARCHIVÉ ──────────────────────────────────
-// Utilise un ReadStream + headers explicites pour éviter le 401 des <a href> directs
-// Le middleware protect() sur la route gère déjà l'auth via header Authorization
 exports.downloadArchivedReport = async (req, res) => {
     try {
-        const filename = path.basename(req.params.filename); // anti path-traversal
+        const filename = path.basename(req.params.filename);
         const filePath = path.join(__dirname, '../storage/reports', filename);
 
         if (!fs.existsSync(filePath)) {
@@ -292,15 +297,13 @@ exports.downloadArchivedReport = async (req, res) => {
         }
 
         const stat = fs.statSync(filePath);
-
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Length', stat.size);
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
 
-        // Stream direct → pas de chargement en mémoire, supporte les gros fichiers
         const fileStream = fs.createReadStream(filePath);
-        fileStream.on('error', (err) => {
+        fileStream.on('error', err => {
             console.error('[REPORT] Stream error:', err);
             if (!res.headersSent) res.status(500).json({ message: 'Erreur lecture fichier.' });
         });

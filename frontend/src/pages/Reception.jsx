@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Bed, Users, Search, Plus, Trash2, Printer, Brush, 
   X, Save, Wallet, CalendarDays, Landmark, FileCheck, 
-  History, MinusCircle, CheckCircle, Activity, Clock, RefreshCw, Percent
+  History, MinusCircle, CheckCircle, Activity, Clock, RefreshCw, Percent,
+  User, Phone, ChevronRight, BedDouble, LogOut, ArrowRightLeft
 } from 'lucide-react';
 
 import StatsCards from './StatsCards';
@@ -29,6 +30,8 @@ const Reception = () => {
   const [selectedResForMove, setSelectedResForMove] = useState(null);
   const [selectedResForCheckout, setSelectedResForCheckout] = useState(null);
   const [discount, setDiscount] = useState(0);
+  const [selectedClient, setSelectedClient] = useState(null); // modale fiche client
+  const [clientSearch, setClientSearch] = useState('');
 
   // ── Auth header ────────────────────────────────────────────────────────────
   const authH = () => ({
@@ -317,7 +320,7 @@ const Reception = () => {
 
       {/* ── TABS ───────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 mb-8 bg-white p-1.5 rounded-2xl w-fit shadow-sm border border-slate-100">
-        {['planning', 'reservations', 'chambres', 'journal'].map(tab => (
+        {['planning', 'reservations', 'clients', 'chambres', 'journal'].map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -347,7 +350,7 @@ const Reception = () => {
               {reservations.filter(r => r.status === 'Occupé').length === 0 ? (
                 <tr><td colSpan={5} className="px-8 py-16 text-center text-slate-300 font-black text-[10px] uppercase">Aucun client en séjour</td></tr>
               ) : reservations.filter(r => r.status === 'Occupé').map(res => (
-                <tr key={res._id} className="hover:bg-slate-50/50 transition-colors">
+                <tr key={res._id} className="hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => { const cl = clients.find(c => c._id === (res.client?._id || res.client)); if(cl) setSelectedClient({...cl, resa: res}); }}>
                   <td className="px-8 py-5 font-black uppercase text-slate-700">{res.client?.name || res.clientName}</td>
                   <td className="px-8 py-5">
                     <span className="bg-[#0F4C3A] text-white px-3 py-1.5 rounded-lg font-black text-[10px]">
@@ -387,7 +390,7 @@ const Reception = () => {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {reservations.filter(r => r.status === 'Réservé').map(res => (
-                <tr key={res._id} className="hover:bg-slate-50/50">
+                <tr key={res._id} className="hover:bg-slate-50/50 cursor-pointer" onClick={() => { const cl = clients.find(c => c._id === (res.client?._id || res.client)); if(cl) setSelectedClient({...cl, resa: res}); }}>
                   <td className="px-8 py-5 font-black uppercase text-slate-700">{res.client?.name || res.clientName}</td>
                   <td className="px-8 py-5 font-bold text-slate-500">CH {res.room?.number || res.roomId}</td>
                   <td className="px-8 py-5 font-bold text-blue-600">
@@ -406,6 +409,154 @@ const Reception = () => {
           </table>
         </div>
       )}
+
+
+      {/* ── CLIENTS ────────────────────────────────────────────────────────── */}
+      {activeTab === 'clients' && (() => {
+        // Enrichir chaque client avec sa réservation active
+        const clientsAvecResa = clients.map(cl => {
+          const resa = reservations.find(r =>
+            (r.client?._id || r.client) === cl._id &&
+            (r.status === 'Occupé' || r.status === 'Réservé')
+          );
+          let dateSortie = null;
+          if (resa && resa.dateArrivee && resa.nights) {
+            const arrivee = new Date(resa.dateArrivee);
+            dateSortie = new Date(arrivee.getTime() + resa.nights * 86400000);
+          }
+          const joursRestants = dateSortie
+            ? Math.ceil((dateSortie - new Date()) / 86400000)
+            : null;
+          return { ...cl, resa, dateSortie, joursRestants };
+        });
+
+        const filteredClients = clientsAvecResa.filter(cl =>
+          cl.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
+          (cl.phone || '').includes(clientSearch)
+        );
+
+        return (
+          <div className="space-y-4">
+            {/* Barre recherche */}
+            <div className="relative w-full max-w-sm">
+              <Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+              <input
+                type="text"
+                placeholder="Rechercher un client, téléphone..."
+                value={clientSearch}
+                onChange={e => setClientSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 bg-white rounded-2xl border border-slate-200 text-[11px] font-bold outline-none focus:ring-2 focus:ring-[#0F4C3A]/20"
+              />
+            </div>
+
+            {/* KPIs rapides */}
+            <div className="grid grid-cols-3 gap-4 mb-2">
+              <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Total clients</p>
+                <p className="text-2xl font-black text-slate-800">{clients.length}</p>
+              </div>
+              <div className="bg-[#0F4C3A] p-4 rounded-2xl text-center">
+                <p className="text-[9px] font-black text-white/60 uppercase mb-1">En séjour</p>
+                <p className="text-2xl font-black text-white">{reservations.filter(r => r.status === 'Occupé').length}</p>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
+                <p className="text-[9px] font-black text-blue-400 uppercase mb-1">Réservés</p>
+                <p className="text-2xl font-black text-blue-600">{reservations.filter(r => r.status === 'Réservé').length}</p>
+              </div>
+            </div>
+
+            {/* Liste clients */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b">
+                  <tr>
+                    <th className="px-6 py-4">Client</th>
+                    <th className="px-6 py-4">Statut</th>
+                    <th className="px-6 py-4">Chambre</th>
+                    <th className="px-6 py-4">Arrivée</th>
+                    <th className="px-6 py-4">Départ prévu</th>
+                    <th className="px-6 py-4">Reste à payer</th>
+                    <th className="px-6 py-4 text-right">Détail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filteredClients.length === 0 ? (
+                    <tr><td colSpan={7} className="py-16 text-center text-slate-300 font-black text-[10px] uppercase">Aucun client trouvé</td></tr>
+                  ) : filteredClients.map(cl => (
+                    <tr key={cl._id} className="hover:bg-slate-50/60 transition-colors cursor-pointer group" onClick={() => setSelectedClient(cl)}>
+                      <td className="px-6 py-4">
+                        <p className="font-black uppercase text-slate-800">{cl.name}</p>
+                        <p className="text-[9px] text-slate-400 font-bold flex items-center gap-1 mt-0.5">
+                          <Phone size={9}/> {cl.phone || '—'}
+                        </p>
+                      </td>
+                      <td className="px-6 py-4">
+                        {!cl.resa ? (
+                          <span className="text-[9px] font-black text-slate-300 bg-slate-50 px-2 py-1 rounded-lg uppercase">Aucun séjour</span>
+                        ) : cl.resa.status === 'Occupé' ? (
+                          <span className="text-[9px] font-black text-white bg-[#0F4C3A] px-2 py-1 rounded-lg uppercase flex items-center gap-1 w-fit">
+                            <BedDouble size={10}/> En chambre
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg uppercase flex items-center gap-1 w-fit">
+                            <Clock size={10}/> Réservé
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {cl.resa ? (
+                          <span className="bg-[#0F4C3A] text-white px-2 py-1 rounded-lg font-black text-[10px]">
+                            CH {cl.resa.room?.number || '?'}
+                          </span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4 font-bold text-slate-600">
+                        {cl.resa?.dateArrivee
+                          ? new Date(cl.resa.dateArrivee).toLocaleDateString('fr-FR')
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4">
+                        {cl.dateSortie ? (
+                          <div>
+                            <p className="font-black text-slate-700">{cl.dateSortie.toLocaleDateString('fr-FR')}</p>
+                            <p className={
+                              cl.joursRestants < 0 ? 'text-[9px] font-black text-red-500' :
+                              cl.joursRestants === 0 ? 'text-[9px] font-black text-[#C5A059]' :
+                              'text-[9px] font-bold text-slate-400'
+                            }>
+                              {cl.joursRestants < 0
+                                ? `Dépassé de ${Math.abs(cl.joursRestants)} j`
+                                : cl.joursRestants === 0
+                                  ? "Départ aujourd'hui"
+                                  : `Dans ${cl.joursRestants} j`}
+                            </p>
+                          </div>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4">
+                        {cl.resa ? (
+                          <span className={
+                            (cl.resa.roomPriceTotal - cl.resa.deposit) > 0
+                              ? 'font-black text-red-500'
+                              : 'font-black text-emerald-600'
+                          }>
+                            {((cl.resa.roomPriceTotal || 0) - (cl.resa.deposit || 0)).toLocaleString('fr-FR')} F
+                          </span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button className="p-2 bg-slate-50 rounded-xl group-hover:bg-[#0F4C3A] group-hover:text-white transition-all text-slate-400">
+                          <ChevronRight size={14}/>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── CHAMBRES ───────────────────────────────────────────────────────── */}
       {activeTab === 'chambres' && (
@@ -631,6 +782,141 @@ const Reception = () => {
           </div>
         </div>
       )}
+
+      {/* ══ MODALE FICHE CLIENT ════════════════════════════════════════════ */}
+      {selectedClient && (() => {
+        const cl = selectedClient;
+        const resa = cl.resa;
+        let dateSortie = null;
+        if (resa?.dateArrivee && resa?.nights) {
+          dateSortie = new Date(new Date(resa.dateArrivee).getTime() + resa.nights * 86400000);
+        }
+        const joursRestants = dateSortie ? Math.ceil((dateSortie - new Date()) / 86400000) : null;
+        const resteAPayer = resa ? Math.max(0, (resa.roomPriceTotal || 0) - (resa.deposit || 0)) : 0;
+
+        return (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/70 backdrop-blur-md p-4">
+            <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden">
+
+              <div className="bg-[#0F4C3A] p-7 text-white relative">
+                <button onClick={() => setSelectedClient(null)} className="absolute top-5 right-5 text-white/50 hover:text-white">
+                  <X size={20}/>
+                </button>
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center">
+                    <User size={26} className="text-white"/>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase tracking-tight">{cl.name}</h2>
+                    <p className="text-[10px] font-bold text-white/60 flex items-center gap-1 mt-0.5">
+                      <Phone size={10}/> {cl.phone || 'Téléphone non renseigné'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  {!resa ? (
+                    <span className="text-[9px] font-black bg-white/10 px-3 py-1.5 rounded-lg uppercase">Aucun séjour actif</span>
+                  ) : resa.status === 'Occupé' ? (
+                    <span className="text-[9px] font-black bg-emerald-400/20 text-emerald-300 px-3 py-1.5 rounded-lg uppercase flex items-center gap-1 w-fit">
+                      <BedDouble size={11}/> En chambre actuellement
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-black bg-blue-400/20 text-blue-300 px-3 py-1.5 rounded-lg uppercase flex items-center gap-1 w-fit">
+                      <Clock size={11}/> Réservation confirmée
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-7 space-y-4">
+                {resa ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-50 p-4 rounded-2xl">
+                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Chambre</p>
+                        <p className="font-black text-[#0F4C3A] text-lg">CH {resa.room?.number || '?'}</p>
+                        <p className="text-[9px] text-slate-400 font-bold">{resa.room?.type || ''}</p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl">
+                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Durée</p>
+                        <p className="font-black text-slate-800 text-lg">{resa.nights} nuit{resa.nights > 1 ? 's' : ''}</p>
+                        <p className="text-[9px] text-slate-400 font-bold">{(resa.room?.price || 0).toLocaleString('fr-FR')} F/nuit</p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl">
+                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Arrivée</p>
+                        <p className="font-black text-slate-800">
+                          {resa.dateArrivee ? new Date(resa.dateArrivee).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : 'N/A'}
+                        </p>
+                      </div>
+                      <div className={joursRestants !== null && joursRestants <= 1 ? 'bg-amber-50 p-4 rounded-2xl border border-amber-100' : 'bg-slate-50 p-4 rounded-2xl'}>
+                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Départ prévu</p>
+                        <p className="font-black text-slate-800">
+                          {dateSortie ? dateSortie.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : 'N/A'}
+                        </p>
+                        {joursRestants !== null && (
+                          <p className={joursRestants < 0 ? 'text-[9px] font-black text-red-500' : joursRestants === 0 ? 'text-[9px] font-black text-[#C5A059]' : 'text-[9px] font-bold text-slate-400'}>
+                            {joursRestants < 0 ? '⚠ Dépassé de ' + Math.abs(joursRestants) + ' j' : joursRestants === 0 ? "⚡ Départ aujourd'hui" : joursRestants === 1 ? '⏳ Départ demain' : 'Dans ' + joursRestants + ' jours'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 p-5 rounded-2xl">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Prix total</p>
+                          <p className="font-black text-white text-lg italic">{(resa.roomPriceTotal || 0).toLocaleString('fr-FR')} F</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Acompte</p>
+                          <p className="font-black text-[#C5A059] text-lg italic">{(resa.deposit || 0).toLocaleString('fr-FR')} F</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Reste</p>
+                          <p className={resteAPayer > 0 ? 'font-black text-red-400 text-lg italic' : 'font-black text-emerald-400 text-lg italic'}>
+                            {resteAPayer > 0 ? resteAPayer.toLocaleString('fr-FR') + ' F' : '✓ Soldé'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {resa.status === 'Occupé' && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => { setSelectedClient(null); setSelectedResForMove(resa); setShowModal('move'); }}
+                          className="py-3 bg-blue-50 text-blue-600 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors">
+                          <ArrowRightLeft size={14}/> Déloger
+                        </button>
+                        <button onClick={() => { setSelectedClient(null); setSelectedResForCheckout(resa); setShowModal('final_checkout'); }}
+                          className="py-3 bg-red-50 text-red-600 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-red-100 transition-colors">
+                          <LogOut size={14}/> Check-out
+                        </button>
+                      </div>
+                    )}
+                    {resa.status === 'Réservé' && (
+                      <button onClick={async () => { await handleCheckIn(resa._id); setSelectedClient(null); }}
+                        className="w-full py-3 bg-emerald-50 text-emerald-600 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-emerald-100 transition-colors">
+                        <BedDouble size={14}/> Confirmer Arrivée
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <div className="py-10 text-center text-slate-300">
+                    <User size={36} className="mx-auto mb-3 opacity-30"/>
+                    <p className="font-black text-[10px] uppercase">Aucun séjour actif</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-7 pb-7">
+                <button onClick={() => handlePrintTicket({ client: cl, room: resa?.room, deposit: resa?.deposit || 0, roomPriceTotal: resa?.roomPriceTotal || 0 }, 'FICHE CLIENT')}
+                  className="w-full py-3 bg-slate-50 text-slate-500 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-slate-100 border border-slate-100">
+                  <Printer size={14}/> Imprimer la fiche
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -1,10 +1,13 @@
-const Cloture = require('../models/Cloture');
-const Activity = require('../models/Activity');
-
+const mongoose = require('mongoose');
+const getCloture  = () => mongoose.model('Cloture');
+const getActivity = () => mongoose.model('Activity');
+const getSale     = () => { try { return mongoose.model('Sale'); } catch(e) { return null; } }
 // ─── CRÉER UNE CLÔTURE + ARCHIVER LES ACTIVITÉS DU PDV ───────────────────────
 // C'est ici que la caisse retombe à zéro côté frontend
 exports.createCloture = async (req, res) => {
     try {
+        const Cloture  = getCloture();
+        const Activity = getActivity();
         const { type, pointDeVente, cash, mobile, totalVentes, notes } = req.body;
 
         const pdv = type || pointDeVente || 'Réception';
@@ -61,6 +64,32 @@ exports.createCloture = async (req, res) => {
             { $set: { archived: true, clotureId: newCloture._id } }
         );
 
+        // 3b. ARCHIVAGE des ventes Sale → clotureId positionné
+        // Deux cas : ventesIds envoyés par la caisse bar/resto, OU toutes les ventes du PDV
+        const Sale = getSale();
+        if (Sale) {
+            const ventesIds = req.body.ventesIds || [];
+            if (ventesIds.length > 0) {
+                // La caisse a envoyé explicitement les IDs des ventes de la session
+                await Sale.updateMany(
+                    { _id: { $in: ventesIds }, clotureId: null },
+                    { $set: { clotureId: newCloture._id } }
+                );
+            } else {
+                // Pas d'IDs → on marque toutes les ventes non clôturées du PDV du jour
+                const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+                await Sale.updateMany(
+                    {
+                        clotureId:  null,
+                        status:     'VALIDÉ',
+                        type:       pdv.toLowerCase(), // 'bar', 'resto'
+                        createdAt:  { $gte: startOfDay }
+                    },
+                    { $set: { clotureId: newCloture._id } }
+                );
+            }
+        }
+
         // 4. Log de clôture
         await Activity.create({
             action:       'CLÔTURE EFFECTUÉE',
@@ -86,6 +115,8 @@ exports.createCloture = async (req, res) => {
 // ─── RÉCUPÉRER LES CLÔTURES ───────────────────────────────────────────────────
 exports.getClotures = async (req, res) => {
     try {
+        const Cloture  = getCloture();
+        const Activity = getActivity();
         const limit = parseInt(req.query.limit) || 50;
 
         // Filtre optionnel : ?audite=false pour récupérer uniquement les non auditées
@@ -108,6 +139,8 @@ exports.getClotures = async (req, res) => {
 // ─── AUDIT INDIVIDUEL (bouton "Signer" RAF) ───────────────────────────────────
 exports.auditCloture = async (req, res) => {
     try {
+        const Cloture  = getCloture();
+        const Activity = getActivity();
         const { statusAudit, noteEcart } = req.body;
 
         const updated = await Cloture.findByIdAndUpdate(
@@ -136,6 +169,8 @@ exports.auditCloture = async (req, res) => {
 // ─── AUDIT DE TOUTES LES CLÔTURES (Clôture générale RAF) ─────────────────────
 exports.auditAllClotures = async (req, res) => {
     try {
+        const Cloture  = getCloture();
+        const Activity = getActivity();
         const { notesAudit } = req.body;
         const auteur = req.user?.nom || req.user?.username || 'RAF';
 

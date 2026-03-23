@@ -4,7 +4,6 @@ const clotureSchema = new mongoose.Schema({
     pointDeVente: {
         type: String,
         required: true,
-        // Accepte les deux graphies + les caisses secondaires
         enum: ['Réception', 'Reception', 'bar', 'resto'],
         default: 'Réception'
     },
@@ -26,7 +25,8 @@ const clotureSchema = new mongoose.Schema({
     },
     notes: { type: String, default: '' },
 
-    // Audit RAF
+    // ── Audit RAF (supervision) ───────────────────────────────────────────────
+    // audite:true = validé par le RAF — N'affecte PAS les compteurs du rapport
     audite:      { type: Boolean, default: false },
     statutAudit: {
         type: String,
@@ -35,12 +35,19 @@ const clotureSchema = new mongoose.Schema({
     },
     dateAudit:   { type: Date },
     auditeurNom: { type: String },
-    notesAudit:  { type: String, default: '' }
+    notesAudit:  { type: String, default: '' },
+
+    // ── Archivage journalier ──────────────────────────────────────────────────
+    // archived:true = posé UNIQUEMENT par force-reset (Nouvelle Journée)
+    // C'est ce marqueur qui remet les compteurs du rapport à zéro
+    archived:    { type: Boolean, default: false },
+    dateArchive: { type: Date, default: null }
 
 }, { timestamps: true });
 
+clotureSchema.index({ archived: 1 });
+clotureSchema.index({ archived: 1, pointDeVente: 1 });
 clotureSchema.index({ audite: 1 });
-clotureSchema.index({ audite: 1, pointDeVente: 1 });
 clotureSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Cloture', clotureSchema);

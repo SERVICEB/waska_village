@@ -217,7 +217,8 @@ const Rapport = () => {
     { id: 'bar',       label: 'Bar Lounge',          icon: <Coffee size={16}/>,   color: '#7C6D8F' },
   ];
 
-  const cloturesJour  = clotures.filter(c => !c.audite);
+  // On filtre sur archived (pas audite) — seul force-reset archive, pas les audits de supervision
+  const cloturesJour  = clotures.filter(c => c.archived !== true);
   const dechargesJour = decharges.filter(d => d.archived !== true);
   const paiesJour     = [];
 

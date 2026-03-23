@@ -148,9 +148,12 @@ exports.moveRoom = async (req, res) => {
         await Room.findByIdAndUpdate(resa.room._id, { status: 'Sale' });
         const newRoom = await Room.findByIdAndUpdate(newRoomId, { status: 'Occupée' }, { new: true });
 
-        resa.room           = newRoomId;
-        resa.roomPriceTotal = newRoom.price * resa.nights;
-        await resa.save();
+        // Utiliser findByIdAndUpdate pour éviter les erreurs strict mode Mongoose
+        await Reservation.findByIdAndUpdate(
+            resa._id,
+            { $set: { room: newRoomId, roomPriceTotal: newRoom.price * resa.nights } },
+            { strict: false }
+        );
 
         await Activity.create({
             action:       'CHANGEMENT CHAMBRE',

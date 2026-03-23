@@ -26,6 +26,7 @@ const seedData = async () => {
       { username: 'reception', password: 'recepWaska456', role: 'reception' },
       { username: 'raf', password: 'rafWaska789', role: 'raf' },
       { username: 'caisse-resto', password: 'caisseWaska321', role: 'caisse-resto' }, 
+      { username: 'stock', password: 'stockwaska214', role: 'stock'}
     ];
 
     // 4. Préparation des Chambres (20 chambres)
